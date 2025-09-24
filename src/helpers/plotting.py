@@ -11,7 +11,8 @@ def plot(
     y: Optional[str] = None,
     group_by: Optional[str] = None,
     title: Optional[str] = None,
-    add_trend: bool = False
+    add_trend: bool = False,
+    show_legend: bool = False
 ) -> None:
     """
     Universal plotting function with seaborn styling
@@ -21,6 +22,7 @@ def plot(
     plot(movies, 'distribution', x='imdb_score', group_by='genres')  # Split by genre
     plot(movies, 'relationship', x='budget', y='gross')
     plot(movies, 'relationship', x='budget', y='gross', group_by='genres')  # Color by genre
+    plot(movies, 'relationship', x='budget', y='gross', group_by='genres', show_legend=True)  # With legend
     """
 
     plt.figure(figsize=(12, 6))
@@ -70,5 +72,12 @@ def plot(
                 )
 
     plt.title(title or f"{plot_type.title()} of {x}" + (f" vs {y}" if y else ""))
+
+    # Hide legend by default, show only if requested
+    if not show_legend:
+        legend = plt.gca().get_legend()
+        if legend:
+            legend.remove()
+
     plt.tight_layout()
     plt.show()
