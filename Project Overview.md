@@ -256,7 +256,7 @@ Siehe die Beispielfragen weiter unten!
 4. **Fragen stellen** - wir helfen gerne!
 
 ### GenAI nutzen:
-Ihr könnt immer Gemini um Hilfe bitten. Wenn ihr das korrekte Model auswählt, hat es automatisch wissen über diese Aufgaben.
+Ihr könnt immer Gemini um Hilfe bitten. Wenn ihr das korrekte Model auswählt, hat es automatisch wissen über diese Aufgaben.gi
 
 **Gute Prompts:**
 - "Ich bekomme einen KeyError bei Spalte 'Genre' - hier ist mein Code: ..."
