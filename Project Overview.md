@@ -69,14 +69,17 @@ Wir haben für euch eine Sammlung von Hilfsfunktionen erstellt, die komplizierte
 
 ### Daten laden und Helper importieren
 ```python
-import pandas as pd
-from helpers import *
+from helpers import load_dataset, load_noc_regions
 
-# Datensatz laden (wählt einen aus!)
-movies = pd.read_csv('filtered_movie_metadata.csv')
-olympics = pd.read_csv('filtered_athlete_events.csv') 
-spotify = pd.read_csv('filtered_spotify_data.csv')
+movies = load_dataset('movies')       # Filtered version by default
+olympics = load_dataset('olympics')   # Enthält nur relevante Medaillen-Daten
+spotify = load_dataset('spotify')     # Beliebte Tracks mit Audio-Features
+noc_regions = load_noc_regions()      # Länderzuordnung für Olympia
 ```
+
+- `load_dataset(name, filtered=True)` lädt automatisch Dateien aus dem `data/` Ordner.
+- Setze `filtered=False`, wenn du die unbearbeiteten Originaldaten brauchst.
+- Mit `load_noc_regions()` bekommst du die Referenztabelle für Olympia-Länder.
 
 ### 1. `filter_data()` - Daten filtern
 
