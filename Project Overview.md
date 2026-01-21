@@ -1,6 +1,6 @@
 # Praktikum Datenanalyse - Benutzerhandbuch
 
-Willkommen zu eurem Praktikumstag! Ihr werdet heute drei spannende Datensätze erforschen und dabei lernen, wie man Daten analysiert und visualisiert.
+Willkommen zu eurem Praktikumstag! Ihr werdet heute drei Datensätze erforschen und dabei lernen, wie man Daten analysiert und visualisiert.
 
 ## Setup und Installation
 
@@ -12,7 +12,7 @@ cd praktikum_aufgaben
 
 ### 2. Abhängigkeiten installieren
 ```bash
-pip install pandas matplotlib seaborn numpy jupyter
+pip install pandas matplotlib seaborn numpy jupyter scikit-learn
 ```
 
 ### 3. Jupyter Notebook starten
@@ -197,6 +197,67 @@ plot(movies, 'distribution', x='imdb_score', group_by='genres')
 plot(olympics, 'relationship', x='Height', y='Weight', group_by='Sport')
 ```
 
+## Machine Learning Helper-Funktionen
+
+Für den ML-Teil gibt es zusätzliche Funktionen, um Klassifikationsmodelle zu trainieren:
+
+```python
+from helpers.ml import *
+```
+
+### 1. `prepare_ml_data()` - Features und Zielvariable trennen
+
+```python
+# Features (X) und Zielvariable (y) vorbereiten
+X, y = prepare_ml_data(spotify, target='track_genre',
+                       features=['danceability', 'energy', 'tempo', 'valence'])
+```
+
+### 2. `split_data()` - Trainings- und Testdaten aufteilen
+
+```python
+# 80% Training, 20% Test
+X_train, X_test, y_train, y_test = split_data(X, y, test_size=0.2)
+```
+
+### 3. `train_model()` - Modell trainieren
+
+```python
+# Decision Tree trainieren
+model = train_model(X_train, y_train, model_type='decision_tree', max_depth=5)
+
+# Oder Random Forest
+model = train_model(X_train, y_train, model_type='random_forest', max_depth=5)
+```
+
+### 4. `evaluate_model()` - Modell bewerten
+
+```python
+# Genauigkeit und Details anzeigen
+results = evaluate_model(model, X_test, y_test)
+print(f"Genauigkeit: {results['accuracy']:.1%}")
+```
+
+### 5. `predict()` - Vorhersagen machen
+
+```python
+# Genre für neue Songs vorhersagen
+vorhersagen = predict(model, neue_songs, features=['danceability', 'energy', 'tempo', 'valence'])
+```
+
+### 6. Visualisierungen
+
+```python
+# Konfusionsmatrix - welche Klassen werden verwechselt?
+plot_confusion_matrix(y_test, results['predictions'])
+
+# Feature-Wichtigkeit - welche Features sind entscheidend?
+plot_feature_importance(model, feature_names)
+
+# Decision Tree visualisieren
+plot_decision_tree(model, feature_names, max_depth=3)
+```
+
 ## Erste Schritte
 
 ### 1. Datensatz wählen und laden
@@ -250,6 +311,13 @@ Siehe die Beispielfragen weiter unten!
 - Haben verschiedene Genres charakteristische "Signaturen"?
 - Wie unterscheiden sich die Genres in Energie und Positivität?
 
+### Für Machine Learning:
+- Kann man das Genre eines Songs anhand der Audio-Features vorhersagen?
+- Welche Features sind am wichtigsten für die Genre-Vorhersage?
+- Welche Genres werden am häufigsten verwechselt?
+- Ist ein Random Forest besser als ein einzelner Decision Tree?
+- Wie verändert sich die Genauigkeit mit mehr oder weniger Genres?
+
 ## Hilfe und Tipps
 
 ### Bei Problemen:
@@ -283,5 +351,150 @@ data.describe()
 data['spaltenname'].unique()
 data['spaltenname'].value_counts()
 ```
+
+## Für Fortgeschrittene: Pandas & Sklearn direkt nutzen
+
+Wer tiefer einsteigen möchte, kann die gleichen Aufgaben auch direkt mit pandas und sklearn lösen. Hier sind die Entsprechungen zu unseren Helper-Funktionen:
+
+### Pandas: Daten filtern
+
+```python
+# Mit Helper:
+filter_data(movies, title_year=2010, imdb_score_min=7.0)
+
+# Mit pandas:
+movies[(movies['title_year'] == 2010) & (movies['imdb_score'] >= 7.0)]
+
+# Mehrere Werte (isin)
+movies[movies['genres'].isin(['Action', 'Comedy', 'Drama'])]
+
+# Text enthält
+movies[movies['genres'].str.contains('Action', na=False)]
+```
+
+### Pandas: Neue Spalten erstellen
+
+```python
+# Mit Helper:
+add_columns(movies, profit="gross - budget")
+
+# Mit pandas:
+movies['profit'] = movies['gross'] - movies['budget']
+
+# Bedingte Spalten mit np.where
+import numpy as np
+movies['is_good'] = np.where(movies['imdb_score'] >= 7, 'Gut', 'Schlecht')
+
+# Komplexere Bedingungen mit apply
+movies['category'] = movies['imdb_score'].apply(
+    lambda x: 'Super' if x >= 8 else ('Gut' if x >= 6 else 'Mäßig')
+)
+```
+
+### Pandas: Gruppieren und Aggregieren
+
+```python
+# Mit Helper:
+summarize_by_group(movies, 'genres', 'imdb_score', 'mean')
+
+# Mit pandas:
+movies.groupby('genres')['imdb_score'].mean()
+
+# Mehrere Aggregationen
+movies.groupby('genres').agg({
+    'imdb_score': 'mean',
+    'gross': 'sum',
+    'movie_title': 'count'
+})
+```
+
+### Pandas: Sortieren und Top N
+
+```python
+# Mit Helper:
+get_top_n(movies, 'imdb_score', n=10)
+
+# Mit pandas:
+movies.nlargest(10, 'imdb_score')
+movies.nsmallest(10, 'imdb_score')  # Bottom 10
+
+# Sortieren
+movies.sort_values('imdb_score', ascending=False).head(10)
+```
+
+### Pandas: Visualisierungen mit Matplotlib/Seaborn
+
+```python
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Histogramm
+plt.hist(movies['imdb_score'], bins=20)
+plt.xlabel('IMDB Score')
+plt.title('Verteilung der Bewertungen')
+plt.show()
+
+# Scatterplot
+plt.scatter(movies['budget'], movies['gross'], alpha=0.5)
+plt.xlabel('Budget')
+plt.ylabel('Einnahmen')
+plt.show()
+
+# Seaborn für schönere Plots
+sns.histplot(data=movies, x='imdb_score', hue='genres')
+sns.scatterplot(data=movies, x='budget', y='gross', hue='genres')
+```
+
+### Sklearn: Machine Learning Pipeline
+
+```python
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+
+# Features und Zielvariable
+feature_cols = ['danceability', 'energy', 'tempo', 'valence']
+X = spotify[feature_cols]
+y = spotify['track_genre']
+
+# Train/Test Split
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+# Modell trainieren
+model = DecisionTreeClassifier(max_depth=5, random_state=42)
+model.fit(X_train, y_train)
+
+# Vorhersagen und Bewertung
+y_pred = model.predict(X_test)
+print(f"Genauigkeit: {accuracy_score(y_test, y_pred):.1%}")
+print(classification_report(y_test, y_pred))
+
+# Konfusionsmatrix
+cm = confusion_matrix(y_test, y_pred)
+
+# Feature Importance
+importance = pd.DataFrame({
+    'Feature': feature_cols,
+    'Wichtigkeit': model.feature_importances_
+}).sort_values('Wichtigkeit', ascending=False)
+```
+
+### Weiterführende Ressourcen
+
+- [Pandas Dokumentation](https://pandas.pydata.org/docs/)
+- [Seaborn Tutorial](https://seaborn.pydata.org/tutorial.html)
+- [Sklearn User Guide](https://scikit-learn.org/stable/user_guide.html)
+
+## Notebooks
+
+| Notebook | Beschreibung |
+|----------|-------------|
+| `work_environment.ipynb` | Arbeitsumgebung für Datenanalyse |
+| `ml_work_environment.ipynb` | Arbeitsumgebung für Machine Learning |
+| `spotify_analysis_example.ipynb` | Beispielanalyse mit Spotify-Daten |
+| `ml_showcase.ipynb` | Beispiel für Machine Learning mit Erklärungen |
 
 Viel Erfolg beim Erkunden der Daten! 🚀
