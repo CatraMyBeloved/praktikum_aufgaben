@@ -11,7 +11,10 @@ from typing import Optional, List, Tuple, Dict, Any
 
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier, plot_tree
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 
 __all__ = [
@@ -142,7 +145,8 @@ def train_model(
     X_train: pd.DataFrame,
     y_train: pd.Series,
     model_type: str = "decision_tree",
-    max_depth: Optional[int] = 5
+    max_depth: Optional[int] = 5,
+    n_neighbors: int = 5
 ) -> Any:
     """
     Trainiert ein Klassifikationsmodell.
@@ -154,9 +158,16 @@ def train_model(
     y_train : pd.Series
         Trainings-Zielvariable.
     model_type : str, default="decision_tree"
-        Art des Modells: "decision_tree" oder "random_forest".
+        Art des Modells:
+        - "decision_tree" - Einfacher Entscheidungsbaum
+        - "random_forest" - Mehrere Bäume stimmen ab
+        - "knn" - K-Nearest Neighbors (findet ähnliche Songs)
+        - "svm" - Support Vector Machine
+        - "gradient_boosting" - Boosted Trees (fortgeschritten)
     max_depth : int, optional, default=5
-        Maximale Tiefe des Baums. Begrenzt Overfitting.
+        Maximale Tiefe für Baum-Modelle. Begrenzt Overfitting.
+    n_neighbors : int, default=5
+        Anzahl Nachbarn für KNN.
 
     Returns
     -------
@@ -166,20 +177,47 @@ def train_model(
     Example
     -------
     >>> model = train_model(X_train, y_train, model_type='decision_tree', max_depth=5)
+    >>> model = train_model(X_train, y_train, model_type='knn', n_neighbors=5)
     """
+    valid_types = ["decision_tree", "random_forest", "knn", "svm", "gradient_boosting"]
+
     if model_type == "decision_tree":
         model = DecisionTreeClassifier(max_depth=max_depth, random_state=42)
         model_name = "Decision Tree"
+        param_info = f"max_depth={max_depth}" if max_depth else "unbegrenzte Tiefe"
+
     elif model_type == "random_forest":
         model = RandomForestClassifier(max_depth=max_depth, n_estimators=100, random_state=42)
         model_name = "Random Forest"
+        param_info = f"max_depth={max_depth}, 100 Bäume"
+
+    elif model_type == "knn":
+        model = KNeighborsClassifier(n_neighbors=n_neighbors)
+        model_name = "K-Nearest Neighbors"
+        param_info = f"n_neighbors={n_neighbors}"
+
+    elif model_type == "svm":
+        model = SVC(kernel='rbf', random_state=42)
+        model_name = "Support Vector Machine"
+        param_info = "kernel=rbf"
+
+    elif model_type == "gradient_boosting":
+        model = GradientBoostingClassifier(
+            max_depth=max_depth if max_depth else 3,
+            n_estimators=100,
+            learning_rate=0.1,
+            random_state=42
+        )
+        model_name = "Gradient Boosting"
+        param_info = f"max_depth={max_depth if max_depth else 3}, 100 Bäume"
+
     else:
-        raise ValueError(f"Fehler: model_type muss 'decision_tree' oder 'random_forest' sein, nicht '{model_type}'.")
+        raise ValueError(
+            f"Fehler: model_type muss einer von {valid_types} sein, nicht '{model_type}'."
+        )
 
     model.fit(X_train, y_train)
-
-    depth_info = f"max_depth={max_depth}" if max_depth else "unbegrenzte Tiefe"
-    print(f"Modell trainiert: {model_name} ({depth_info})")
+    print(f"Modell trainiert: {model_name} ({param_info})")
 
     return model
 
@@ -376,8 +414,9 @@ def plot_feature_importance(
     >>> importance_df = plot_feature_importance(model, X_train.columns)
     """
     if not hasattr(model, 'feature_importances_'):
-        raise ValueError("Fehler: Das Modell hat keine feature_importances_. "
-                        "Verwende ein Decision Tree oder Random Forest Modell.")
+        print("Hinweis: Dieses Modell unterstützt keine Feature-Wichtigkeit.")
+        print("Verwende Decision Tree, Random Forest oder Gradient Boosting für diese Funktion.")
+        return pd.DataFrame({'Feature': feature_names, 'Wichtigkeit': [None] * len(feature_names)})
 
     # DataFrame mit Wichtigkeiten erstellen
     importance_df = pd.DataFrame({
@@ -445,7 +484,7 @@ def plot_decision_tree(
     """
     if not isinstance(model, DecisionTreeClassifier):
         print("Hinweis: plot_decision_tree funktioniert nur mit Decision Trees.")
-        print("Für Random Forest verwende plot_feature_importance() stattdessen.")
+        print("Für andere Modelle verwende plot_feature_importance() stattdessen.")
         return
 
     if class_names is None:

@@ -223,11 +223,20 @@ X_train, X_test, y_train, y_test = split_data(X, y, test_size=0.2)
 ### 3. `train_model()` - Modell trainieren
 
 ```python
-# Decision Tree trainieren
+# Decision Tree - einfacher Entscheidungsbaum
 model = train_model(X_train, y_train, model_type='decision_tree', max_depth=5)
 
-# Oder Random Forest
+# Random Forest - mehrere Bäume stimmen ab
 model = train_model(X_train, y_train, model_type='random_forest', max_depth=5)
+
+# KNN - findet ähnliche Songs
+model = train_model(X_train, y_train, model_type='knn', n_neighbors=5)
+
+# SVM - Support Vector Machine
+model = train_model(X_train, y_train, model_type='svm')
+
+# Gradient Boosting - fortgeschritten, oft sehr genau
+model = train_model(X_train, y_train, model_type='gradient_boosting', max_depth=3)
 ```
 
 ### 4. `evaluate_model()` - Modell bewerten
@@ -324,19 +333,7 @@ Siehe die Beispielfragen weiter unten!
 1. **Fehlermeldungen lesen** - oft steht da genau, was falsch ist
 2. **Spaltennamen prüfen** - `data.columns` zeigt alle verfügbaren Spalten
 3. **Beispiele aus diesem Handbuch** kopieren und anpassen
-4. **Fragen stellen** - wir helfen gerne!
-
-### GenAI nutzen:
-Ihr könnt immer Gemini um Hilfe bitten. Wenn ihr das korrekte Model auswählt, hat es automatisch wissen über diese Aufgaben.gi
-
-**Gute Prompts:**
-- "Ich bekomme einen KeyError bei Spalte 'Genre' - hier ist mein Code: ..."
-- "Erkläre mir, was dieser pandas-Befehl macht: data.groupby('Sport').count()"  
-- "Wie kann ich in Python zwei Spalten multiplizieren?"
-
-**Schlechte Prompts:**
-- "Fix meinen Code"  
-- "Mach eine Analyse"
+4. **Fragen stellen** - Einfach mir Bescheid sagen
 
 ### Nützliche pandas-Tricks:
 ```python
