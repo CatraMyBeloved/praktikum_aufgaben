@@ -14,8 +14,50 @@ from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+
+
+# =============================================================================
+# Internal Validation Helpers
+# =============================================================================
+
+def _validate_dataframe(data: pd.DataFrame) -> None:
+    """Prüft ob der DataFrame nicht leer ist."""
+    if data.empty:
+        raise ValueError(
+            "Fehler: Der DataFrame ist leer (0 Zeilen).\n"
+            "  Problem: Machine Learning benötigt Daten zum Trainieren.\n"
+            "  Lösung: Prüfen Sie, ob die Daten korrekt geladen wurden oder ob ein Filter zu streng war.\n"
+            "  Tipp: Verwenden Sie 'len(data)' um die Anzahl der Zeilen zu prüfen."
+        )
+
+
+def _validate_target(y: pd.Series, target_name: str) -> None:
+    """Prüft ob die Zielvariable mindestens 2 Klassen hat."""
+    n_classes = y.nunique()
+    if n_classes < 2:
+        classes = y.unique().tolist()
+        raise ValueError(
+            f"Fehler: Zielvariable '{target_name}' hat nur {n_classes} Klasse(n): {classes}.\n"
+            f"  Problem: Klassifikation benötigt mindestens 2 verschiedene Klassen.\n"
+            f"  Mögliche Ursachen:\n"
+            f"    1. Der DataFrame wurde zu stark gefiltert\n"
+            f"    2. Die falsche Spalte wurde als Ziel gewählt\n"
+            f"  Lösung: Prüfen Sie die Zielspalte mit: data['{target_name}'].value_counts()"
+        )
+
+
+def _warn_zero_variance(X: pd.DataFrame) -> None:
+    """Warnt bei Features mit nur einem eindeutigen Wert."""
+    for col in X.columns:
+        if X[col].nunique() <= 1:
+            unique_val = X[col].iloc[0] if len(X) > 0 else "N/A"
+            print(
+                f"Hinweis: Feature '{col}' hat nur einen eindeutigen Wert ({unique_val}).\n"
+                f"  Problem: Diese Spalte trägt keine Information zur Vorhersage bei.\n"
+                f"  Empfehlung: Diese Spalte aus den Features entfernen."
+            )
 
 __all__ = [
     'prepare_ml_data',
@@ -32,7 +74,10 @@ __all__ = [
 def prepare_ml_data(
     data: pd.DataFrame,
     target: str,
-    features: Optional[List[str]] = None
+    features: Optional[List[str]] = None,
+    encode_categorical: str = "onehot",
+    max_cardinality: int = 20,
+    drop_first: bool = True
 ) -> Tuple[pd.DataFrame, pd.Series]:
     """
     Trennt die Daten in Features (X) und Zielvariable (y).
@@ -45,6 +90,15 @@ def prepare_ml_data(
         Name der Zielvariable (z.B. 'track_genre').
     features : List[str], optional
         Liste der Feature-Spalten. Wenn None, werden alle numerischen Spalten verwendet.
+    encode_categorical : str, default="onehot"
+        Wie kategoriale Features kodiert werden sollen:
+        - "onehot": One-Hot Encoding (erstellt Dummy-Variablen)
+        - "label": Label Encoding (0, 1, 2, ...)
+        - "none": Keine Kodierung (Fehler bei kategorialen Features)
+    max_cardinality : int, default=20
+        Warnt bei kategorialen Features mit mehr eindeutigen Werten.
+    drop_first : bool, default=True
+        Bei One-Hot Encoding: Erste Kategorie weglassen (vermeidet Multikollinearität).
 
     Returns
     -------
@@ -55,22 +109,43 @@ def prepare_ml_data(
     -------
     >>> X, y = prepare_ml_data(spotify, target='track_genre',
     ...                        features=['danceability', 'energy', 'tempo'])
+    >>> # Mit kategorischen Features:
+    >>> X, y = prepare_ml_data(spotify, target='track_genre',
+    ...                        features=['danceability', 'explicit'],
+    ...                        encode_categorical='onehot')
     """
-    # Prüfen ob Zielvariable existiert
+    # 1. Validate empty DataFrame
+    _validate_dataframe(data)
+
+    # 2. Validate target exists
     if target not in data.columns:
         available = ', '.join(data.columns[:10].tolist())
         if len(data.columns) > 10:
-            available += ', ...'
-        raise ValueError(f"Fehler: Spalte '{target}' nicht gefunden. Verfügbare Spalten: {available}")
+            available += f', ... (+{len(data.columns) - 10} weitere)'
+        raise ValueError(
+            f"Fehler: Zielspalte '{target}' nicht gefunden.\n"
+            f"  Verfügbare Spalten: {available}\n"
+            f"  Tipp: Achten Sie auf Groß-/Kleinschreibung."
+        )
 
-    # Features auswählen
+    # 3. Validate target has 2+ classes
+    y = data[target].copy()
+    _validate_target(y, target)
+
+    # 4. Select features
     if features is None:
         # Automatisch alle numerischen Spalten auswählen (außer Zielvariable)
         numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
         features = [col for col in numeric_cols if col != target]
 
         if len(features) == 0:
-            raise ValueError("Fehler: Keine numerischen Features gefunden.")
+            all_dtypes = data.dtypes.value_counts().to_dict()
+            raise ValueError(
+                f"Fehler: Keine numerischen Features gefunden.\n"
+                f"  Spaltentypen im DataFrame: {all_dtypes}\n"
+                f"  Lösung: Geben Sie Features explizit an und nutzen Sie encode_categorical='onehot'\n"
+                f"  Beispiel: prepare_ml_data(data, '{target}', features=['spalte1', 'spalte2'], encode_categorical='onehot')"
+            )
 
         print(f"Automatisch {len(features)} numerische Features ausgewählt: {', '.join(features[:5])}" +
               (f", ... (+{len(features)-5} weitere)" if len(features) > 5 else ""))
@@ -78,19 +153,72 @@ def prepare_ml_data(
         # Prüfen ob alle angegebenen Features existieren
         missing = [f for f in features if f not in data.columns]
         if missing:
-            raise ValueError(f"Fehler: Feature(s) nicht gefunden: {', '.join(missing)}")
+            available = ', '.join(data.columns[:10].tolist())
+            if len(data.columns) > 10:
+                available += f', ... (+{len(data.columns) - 10} weitere)'
+            raise ValueError(
+                f"Fehler: Feature(s) nicht gefunden: {', '.join(missing)}\n"
+                f"  Verfügbare Spalten: {available}\n"
+                f"  Tipp: Achten Sie auf Groß-/Kleinschreibung."
+            )
 
-    # Features und Zielvariable extrahieren
+    # 5. Extract features
     X = data[features].copy()
-    y = data[target].copy()
 
-    # Fehlende Werte behandeln
-    if X.isna().any().any():
-        na_count = X.isna().sum().sum()
-        X = X.fillna(X.median())
-        print(f"Hinweis: {na_count} fehlende Werte in Features mit Median aufgefüllt.")
+    # 6. Identify categorical columns
+    cat_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()
 
-    print(f"Daten vorbereitet: {len(X)} Datensätze, {len(features)} Features, Ziel: '{target}'")
+    # 7. Handle categorical encoding
+    if cat_cols:
+        if encode_categorical == "none":
+            raise ValueError(
+                f"Fehler: Kategoriale Features gefunden: {cat_cols}\n"
+                f"  Problem: ML-Modelle können nicht direkt mit Text arbeiten.\n"
+                f"  Lösung: Verwenden Sie encode_categorical='onehot' oder 'label'\n"
+                f"  Beispiel: prepare_ml_data(data, '{target}', features={features}, encode_categorical='onehot')"
+            )
+
+        # Warn about high cardinality
+        for col in cat_cols:
+            n_unique = X[col].nunique()
+            if n_unique > max_cardinality:
+                print(
+                    f"Warnung: Feature '{col}' hat {n_unique} eindeutige Werte (> {max_cardinality}).\n"
+                    f"  Problem: Hohe Kardinalität kann zu Overfitting führen.\n"
+                    f"  Empfehlung: Verwenden Sie encode_categorical='label' oder entfernen Sie diese Spalte."
+                )
+
+        # Handle missing values in categorical columns BEFORE encoding
+        for col in cat_cols:
+            if X[col].isna().any():
+                mode_val = X[col].mode()
+                if len(mode_val) > 0:
+                    X[col] = X[col].fillna(mode_val.iloc[0])
+                    print(f"Hinweis: Fehlende Werte in '{col}' mit Modus aufgefüllt.")
+
+        if encode_categorical == "onehot":
+            X = pd.get_dummies(X, columns=cat_cols, drop_first=drop_first)
+            print(f"One-Hot Encoding angewendet auf: {cat_cols} ({len(X.columns)} Features nach Encoding)")
+
+        elif encode_categorical == "label":
+            for col in cat_cols:
+                le = LabelEncoder()
+                X[col] = le.fit_transform(X[col].astype(str))
+            print(f"Label Encoding angewendet auf: {cat_cols}")
+
+    # 8. Handle missing values in numeric columns
+    numeric_cols_in_X = X.select_dtypes(include=[np.number]).columns.tolist()
+    if numeric_cols_in_X:
+        na_mask = X[numeric_cols_in_X].isna()
+        if na_mask.any().any():
+            na_count = na_mask.sum().sum()
+            X[numeric_cols_in_X] = X[numeric_cols_in_X].fillna(X[numeric_cols_in_X].median())
+            print(f"Hinweis: {na_count} fehlende Werte in numerischen Features mit Median aufgefüllt.")
+
+    # 9. Warn about zero-variance features
+    _warn_zero_variance(X)
+
+    print(f"Daten vorbereitet: {len(X)} Datensätze, {len(X.columns)} Features, Ziel: '{target}'")
 
     return X, y
 
@@ -129,6 +257,29 @@ def split_data(
     -------
     >>> X_train, X_test, y_train, y_test = split_data(X, y, test_size=0.2)
     """
+    # Validate minimum samples per class for stratification
+    class_counts = y.value_counts()
+    min_per_class = class_counts.min()
+    smallest_class = class_counts.idxmin()
+
+    if min_per_class < 2:
+        raise ValueError(
+            f"Fehler: Klasse '{smallest_class}' hat nur {min_per_class} Datensatz.\n"
+            f"  Problem: Stratifiziertes Splitting benötigt mindestens 2 Samples pro Klasse.\n"
+            f"  Klassenverteilung:\n" +
+            "\n".join(f"    - '{cls}': {count}" for cls, count in class_counts.items()) +
+            f"\n  Lösung: Entfernen Sie seltene Klassen oder fügen Sie mehr Daten hinzu."
+        )
+
+    # Check if we have enough samples for the split
+    min_needed = int(np.ceil(1 / test_size))
+    if min_per_class < min_needed:
+        print(
+            f"Warnung: Klasse '{smallest_class}' hat nur {min_per_class} Samples.\n"
+            f"  Bei test_size={test_size} werden mindestens {min_needed} Samples pro Klasse empfohlen.\n"
+            f"  Das Splitting wird trotzdem versucht."
+        )
+
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y
     )
@@ -213,7 +364,13 @@ def train_model(
 
     else:
         raise ValueError(
-            f"Fehler: model_type muss einer von {valid_types} sein, nicht '{model_type}'."
+            f"Fehler: Unbekannter Modelltyp '{model_type}'.\n"
+            f"  Gültige Optionen:\n"
+            f"    - 'decision_tree': Einfacher Entscheidungsbaum (gut zum Lernen)\n"
+            f"    - 'random_forest': Mehrere Bäume stimmen ab (oft genauer)\n"
+            f"    - 'knn': Klassifiziert nach ähnlichen Datenpunkten\n"
+            f"    - 'svm': Findet optimale Trennebenen\n"
+            f"    - 'gradient_boosting': Baut Bäume sequenziell auf"
         )
 
     model.fit(X_train, y_train)
@@ -297,9 +454,30 @@ def predict(
     >>> vorhersagen = predict(model, neue_songs, features=['danceability', 'energy', 'tempo'])
     """
     if features is not None:
+        # Check if all features exist
+        missing = [f for f in features if f not in data.columns]
+        if missing:
+            raise ValueError(
+                f"Fehler: Feature(s) nicht gefunden: {', '.join(missing)}\n"
+                f"  Verfügbare Spalten: {', '.join(data.columns[:10].tolist())}"
+                + (f", ... (+{len(data.columns) - 10} weitere)" if len(data.columns) > 10 else "")
+            )
         X = data[features]
     else:
         X = data
+
+    # Validate feature count matches model expectation
+    if hasattr(model, 'n_features_in_'):
+        expected = model.n_features_in_
+        actual = X.shape[1]
+        if actual != expected:
+            raise ValueError(
+                f"Fehler: Falsche Anzahl Features.\n"
+                f"  Erwartet: {expected} Features (vom Training)\n"
+                f"  Erhalten: {actual} Features\n"
+                f"  Lösung: Verwenden Sie dieselben Features wie beim Training.\n"
+                f"  Tipp: Speichern Sie die Feature-Liste beim Training: feature_list = X_train.columns.tolist()"
+            )
 
     predictions = model.predict(X)
 
