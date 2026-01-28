@@ -10,12 +10,18 @@ import matplotlib.pyplot as plt
 from typing import Optional, List, Tuple, Dict, Any
 
 from sklearn.model_selection import train_test_split
-from sklearn.tree import DecisionTreeClassifier, plot_tree
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor, plot_tree
+from sklearn.ensemble import (
+    RandomForestClassifier, RandomForestRegressor,
+    GradientBoostingClassifier, GradientBoostingRegressor
+)
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.svm import SVC, SVR
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from sklearn.metrics import (
+    accuracy_score, confusion_matrix, classification_report,
+    mean_squared_error, mean_absolute_error, r2_score
+)
 
 
 # =============================================================================
@@ -75,6 +81,7 @@ def prepare_ml_data(
     data: pd.DataFrame,
     target: str,
     features: Optional[List[str]] = None,
+    task: str = "classification",
     encode_categorical: str = "onehot",
     max_cardinality: int = 20,
     drop_first: bool = True
@@ -90,6 +97,10 @@ def prepare_ml_data(
         Name der Zielvariable (z.B. 'track_genre').
     features : List[str], optional
         Liste der Feature-Spalten. Wenn None, werden alle numerischen Spalten verwendet.
+    task : str, default="classification"
+        Art der Aufgabe:
+        - "classification" - Prüft ob Ziel mind. 2 Klassen hat
+        - "regression" - Prüft ob Ziel numerisch ist
     encode_categorical : str, default="onehot"
         Wie kategoriale Features kodiert werden sollen:
         - "onehot": One-Hot Encoding (erstellt Dummy-Variablen)
@@ -107,12 +118,12 @@ def prepare_ml_data(
 
     Example
     -------
+    >>> # Klassifikation
     >>> X, y = prepare_ml_data(spotify, target='track_genre',
     ...                        features=['danceability', 'energy', 'tempo'])
-    >>> # Mit kategorischen Features:
-    >>> X, y = prepare_ml_data(spotify, target='track_genre',
-    ...                        features=['danceability', 'explicit'],
-    ...                        encode_categorical='onehot')
+    >>> # Regression
+    >>> X, y = prepare_ml_data(movies, target='revenue',
+    ...                        features=['budget', 'runtime'], task='regression')
     """
     # 1. Validate empty DataFrame
     _validate_dataframe(data)
@@ -128,9 +139,21 @@ def prepare_ml_data(
             f"  Tipp: Achten Sie auf Groß-/Kleinschreibung."
         )
 
-    # 3. Validate target has 2+ classes
+    # 3. Validate target based on task
     y = data[target].copy()
-    _validate_target(y, target)
+
+    if task == "regression":
+        # For regression: target should be numeric
+        if not np.issubdtype(y.dtype, np.number):
+            raise ValueError(
+                f"Fehler: Zielvariable '{target}' ist nicht numerisch (Typ: {y.dtype}).\n"
+                f"  Problem: Regression benötigt eine numerische Zielvariable.\n"
+                f"  Lösung: Verwenden Sie task='classification' für kategoriale Ziele\n"
+                f"          oder wählen Sie eine numerische Spalte als Ziel."
+            )
+    else:
+        # For classification: target should have 2+ classes
+        _validate_target(y, target)
 
     # 4. Select features
     if features is None:
@@ -227,7 +250,8 @@ def split_data(
     X: pd.DataFrame,
     y: pd.Series,
     test_size: float = 0.2,
-    random_state: int = 42
+    random_state: int = 42,
+    task: str = "classification"
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
     """
     Teilt die Daten in Trainings- und Testdaten auf.
@@ -247,6 +271,10 @@ def split_data(
         Anteil der Testdaten (0.2 = 20%).
     random_state : int, default=42
         Zufallszahl für Reproduzierbarkeit.
+    task : str, default="classification"
+        Art der Aufgabe:
+        - "classification" - Stratifiziertes Splitting (gleiche Klassenverteilung)
+        - "regression" - Zufälliges Splitting
 
     Returns
     -------
@@ -256,33 +284,42 @@ def split_data(
     Example
     -------
     >>> X_train, X_test, y_train, y_test = split_data(X, y, test_size=0.2)
+    >>> # Für Regression:
+    >>> X_train, X_test, y_train, y_test = split_data(X, y, task='regression')
     """
-    # Validate minimum samples per class for stratification
-    class_counts = y.value_counts()
-    min_per_class = class_counts.min()
-    smallest_class = class_counts.idxmin()
-
-    if min_per_class < 2:
-        raise ValueError(
-            f"Fehler: Klasse '{smallest_class}' hat nur {min_per_class} Datensatz.\n"
-            f"  Problem: Stratifiziertes Splitting benötigt mindestens 2 Samples pro Klasse.\n"
-            f"  Klassenverteilung:\n" +
-            "\n".join(f"    - '{cls}': {count}" for cls, count in class_counts.items()) +
-            f"\n  Lösung: Entfernen Sie seltene Klassen oder fügen Sie mehr Daten hinzu."
+    if task == "regression":
+        # No stratification for regression
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=random_state
         )
+    else:
+        # Stratified split for classification
+        # Validate minimum samples per class for stratification
+        class_counts = y.value_counts()
+        min_per_class = class_counts.min()
+        smallest_class = class_counts.idxmin()
 
-    # Check if we have enough samples for the split
-    min_needed = int(np.ceil(1 / test_size))
-    if min_per_class < min_needed:
-        print(
-            f"Warnung: Klasse '{smallest_class}' hat nur {min_per_class} Samples.\n"
-            f"  Bei test_size={test_size} werden mindestens {min_needed} Samples pro Klasse empfohlen.\n"
-            f"  Das Splitting wird trotzdem versucht."
+        if min_per_class < 2:
+            raise ValueError(
+                f"Fehler: Klasse '{smallest_class}' hat nur {min_per_class} Datensatz.\n"
+                f"  Problem: Stratifiziertes Splitting benötigt mindestens 2 Samples pro Klasse.\n"
+                f"  Klassenverteilung:\n" +
+                "\n".join(f"    - '{cls}': {count}" for cls, count in class_counts.items()) +
+                f"\n  Lösung: Entfernen Sie seltene Klassen oder fügen Sie mehr Daten hinzu."
+            )
+
+        # Check if we have enough samples for the split
+        min_needed = int(np.ceil(1 / test_size))
+        if min_per_class < min_needed:
+            print(
+                f"Warnung: Klasse '{smallest_class}' hat nur {min_per_class} Samples.\n"
+                f"  Bei test_size={test_size} werden mindestens {min_needed} Samples pro Klasse empfohlen.\n"
+                f"  Das Splitting wird trotzdem versucht."
+            )
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=random_state, stratify=y
         )
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=y
-    )
 
     train_pct = int((1 - test_size) * 100)
     test_pct = int(test_size * 100)
@@ -296,11 +333,12 @@ def train_model(
     X_train: pd.DataFrame,
     y_train: pd.Series,
     model_type: str = "decision_tree",
+    task: str = "classification",
     max_depth: Optional[int] = 5,
     n_neighbors: int = 5
 ) -> Any:
     """
-    Trainiert ein Klassifikationsmodell.
+    Trainiert ein Klassifikations- oder Regressionsmodell.
 
     Parameters
     ----------
@@ -312,9 +350,13 @@ def train_model(
         Art des Modells:
         - "decision_tree" - Einfacher Entscheidungsbaum
         - "random_forest" - Mehrere Bäume stimmen ab
-        - "knn" - K-Nearest Neighbors (findet ähnliche Songs)
+        - "knn" - K-Nearest Neighbors (findet ähnliche Datenpunkte)
         - "svm" - Support Vector Machine
         - "gradient_boosting" - Boosted Trees (fortgeschritten)
+    task : str, default="classification"
+        Art der Aufgabe:
+        - "classification" - Vorhersage von Kategorien (z.B. Genre)
+        - "regression" - Vorhersage von Zahlen (z.B. Preis, Bewertung)
     max_depth : int, optional, default=5
         Maximale Tiefe für Baum-Modelle. Begrenzt Overfitting.
     n_neighbors : int, default=5
@@ -327,38 +369,72 @@ def train_model(
 
     Example
     -------
-    >>> model = train_model(X_train, y_train, model_type='decision_tree', max_depth=5)
-    >>> model = train_model(X_train, y_train, model_type='knn', n_neighbors=5)
+    >>> # Klassifikation (Standard)
+    >>> model = train_model(X_train, y_train, model_type='decision_tree')
+    >>> # Regression
+    >>> model = train_model(X_train, y_train, model_type='decision_tree', task='regression')
     """
     valid_types = ["decision_tree", "random_forest", "knn", "svm", "gradient_boosting"]
+    valid_tasks = ["classification", "regression"]
+
+    if task not in valid_tasks:
+        raise ValueError(
+            f"Fehler: Unbekannte Aufgabe '{task}'.\n"
+            f"  Gültige Optionen:\n"
+            f"    - 'classification': Vorhersage von Kategorien (z.B. Genre, Klasse)\n"
+            f"    - 'regression': Vorhersage von Zahlenwerten (z.B. Preis, Bewertung)"
+        )
+
+    is_regression = (task == "regression")
+    task_label = "Regression" if is_regression else "Klassifikation"
 
     if model_type == "decision_tree":
-        model = DecisionTreeClassifier(max_depth=max_depth, random_state=42)
+        if is_regression:
+            model = DecisionTreeRegressor(max_depth=max_depth, random_state=42)
+        else:
+            model = DecisionTreeClassifier(max_depth=max_depth, random_state=42)
         model_name = "Decision Tree"
         param_info = f"max_depth={max_depth}" if max_depth else "unbegrenzte Tiefe"
 
     elif model_type == "random_forest":
-        model = RandomForestClassifier(max_depth=max_depth, n_estimators=100, random_state=42)
+        if is_regression:
+            model = RandomForestRegressor(max_depth=max_depth, n_estimators=100, random_state=42)
+        else:
+            model = RandomForestClassifier(max_depth=max_depth, n_estimators=100, random_state=42)
         model_name = "Random Forest"
         param_info = f"max_depth={max_depth}, 100 Bäume"
 
     elif model_type == "knn":
-        model = KNeighborsClassifier(n_neighbors=n_neighbors)
+        if is_regression:
+            model = KNeighborsRegressor(n_neighbors=n_neighbors)
+        else:
+            model = KNeighborsClassifier(n_neighbors=n_neighbors)
         model_name = "K-Nearest Neighbors"
         param_info = f"n_neighbors={n_neighbors}"
 
     elif model_type == "svm":
-        model = SVC(kernel='rbf', random_state=42)
+        if is_regression:
+            model = SVR(kernel='rbf')
+        else:
+            model = SVC(kernel='rbf', random_state=42)
         model_name = "Support Vector Machine"
         param_info = "kernel=rbf"
 
     elif model_type == "gradient_boosting":
-        model = GradientBoostingClassifier(
-            max_depth=max_depth if max_depth else 3,
-            n_estimators=100,
-            learning_rate=0.1,
-            random_state=42
-        )
+        if is_regression:
+            model = GradientBoostingRegressor(
+                max_depth=max_depth if max_depth else 3,
+                n_estimators=100,
+                learning_rate=0.1,
+                random_state=42
+            )
+        else:
+            model = GradientBoostingClassifier(
+                max_depth=max_depth if max_depth else 3,
+                n_estimators=100,
+                learning_rate=0.1,
+                random_state=42
+            )
         model_name = "Gradient Boosting"
         param_info = f"max_depth={max_depth if max_depth else 3}, 100 Bäume"
 
@@ -368,13 +444,13 @@ def train_model(
             f"  Gültige Optionen:\n"
             f"    - 'decision_tree': Einfacher Entscheidungsbaum (gut zum Lernen)\n"
             f"    - 'random_forest': Mehrere Bäume stimmen ab (oft genauer)\n"
-            f"    - 'knn': Klassifiziert nach ähnlichen Datenpunkten\n"
+            f"    - 'knn': Findet ähnliche Datenpunkte\n"
             f"    - 'svm': Findet optimale Trennebenen\n"
             f"    - 'gradient_boosting': Baut Bäume sequenziell auf"
         )
 
     model.fit(X_train, y_train)
-    print(f"Modell trainiert: {model_name} ({param_info})")
+    print(f"Modell trainiert: {model_name} für {task_label} ({param_info})")
 
     return model
 
@@ -383,6 +459,7 @@ def evaluate_model(
     model: Any,
     X_test: pd.DataFrame,
     y_test: pd.Series,
+    task: str = "classification",
     show_details: bool = True
 ) -> Dict[str, Any]:
     """
@@ -396,34 +473,74 @@ def evaluate_model(
         Test-Features.
     y_test : pd.Series
         Test-Zielvariable (wahre Werte).
+    task : str, default="classification"
+        Art der Aufgabe:
+        - "classification" - Klassifikationsmetriken (Accuracy, Confusion Matrix)
+        - "regression" - Regressionsmetriken (MSE, RMSE, MAE, R²)
     show_details : bool, default=True
         Ob detaillierte Metriken angezeigt werden sollen.
 
     Returns
     -------
     Dict[str, Any]
-        Dictionary mit 'accuracy', 'predictions', 'confusion_matrix'.
+        Für Klassifikation: 'accuracy', 'predictions', 'confusion_matrix'
+        Für Regression: 'r2', 'mse', 'rmse', 'mae', 'predictions'
 
     Example
     -------
+    >>> # Klassifikation
     >>> results = evaluate_model(model, X_test, y_test)
     >>> print(f"Genauigkeit: {results['accuracy']:.1%}")
+    >>> # Regression
+    >>> results = evaluate_model(model, X_test, y_test, task='regression')
+    >>> print(f"R²: {results['r2']:.3f}")
     """
     predictions = model.predict(X_test)
-    acc = accuracy_score(y_test, predictions)
-    cm = confusion_matrix(y_test, predictions)
 
-    print(f"Genauigkeit: {acc:.1%} ({acc:.1%} der Songs wurden richtig klassifiziert)")
+    if task == "regression":
+        mse = mean_squared_error(y_test, predictions)
+        rmse = np.sqrt(mse)
+        mae = mean_absolute_error(y_test, predictions)
+        r2 = r2_score(y_test, predictions)
 
-    if show_details:
-        print("\nKlassifikationsbericht:")
-        print(classification_report(y_test, predictions))
+        print(f"R² Score: {r2:.3f} (1.0 = perfekt, 0.0 = so gut wie Durchschnitt)")
+        print(f"RMSE: {rmse:.3f} (durchschnittlicher Fehler in Originaleinheit)")
 
-    return {
-        'accuracy': acc,
-        'predictions': pd.Series(predictions, index=y_test.index),
-        'confusion_matrix': cm
-    }
+        if show_details:
+            print(f"\nDetaillierte Metriken:")
+            print(f"  MSE (Mean Squared Error): {mse:.3f}")
+            print(f"  RMSE (Root MSE): {rmse:.3f}")
+            print(f"  MAE (Mean Absolute Error): {mae:.3f}")
+            print(f"  R² (Bestimmtheitsmaß): {r2:.3f}")
+
+            # Show prediction range
+            print(f"\nVorhersage-Statistik:")
+            print(f"  Tatsächlich: Min={y_test.min():.2f}, Max={y_test.max():.2f}, Mean={y_test.mean():.2f}")
+            print(f"  Vorhergesagt: Min={predictions.min():.2f}, Max={predictions.max():.2f}, Mean={predictions.mean():.2f}")
+
+        return {
+            'r2': r2,
+            'mse': mse,
+            'rmse': rmse,
+            'mae': mae,
+            'predictions': pd.Series(predictions, index=y_test.index)
+        }
+
+    else:  # classification
+        acc = accuracy_score(y_test, predictions)
+        cm = confusion_matrix(y_test, predictions)
+
+        print(f"Genauigkeit: {acc:.1%} ({acc:.1%} der Datensätze wurden richtig klassifiziert)")
+
+        if show_details:
+            print("\nKlassifikationsbericht:")
+            print(classification_report(y_test, predictions))
+
+        return {
+            'accuracy': acc,
+            'predictions': pd.Series(predictions, index=y_test.index),
+            'confusion_matrix': cm
+        }
 
 
 def predict(
@@ -660,13 +777,18 @@ def plot_decision_tree(
     -------
     >>> plot_decision_tree(model, X_train.columns)
     """
-    if not isinstance(model, DecisionTreeClassifier):
+    if not isinstance(model, (DecisionTreeClassifier, DecisionTreeRegressor)):
         print("Hinweis: plot_decision_tree funktioniert nur mit Decision Trees.")
         print("Für andere Modelle verwende plot_feature_importance() stattdessen.")
         return
 
+    is_classifier = isinstance(model, DecisionTreeClassifier)
+
     if class_names is None:
-        class_names = [str(c) for c in model.classes_]
+        if is_classifier:
+            class_names = [str(c) for c in model.classes_]
+        else:
+            class_names = None  # Regression trees don't have classes
 
     fig, ax = plt.subplots(figsize=(20, 10))
 
